@@ -6,6 +6,7 @@ Modified from .defaults.py
 import os
 
 import torch
+from torch.utils.data import DataLoader, Dataset
 
 import detectron2.data.transforms as T
 from detectron2.checkpoint import DetectionCheckpointer
@@ -77,8 +78,7 @@ class OctoPredictor:
 
     1. Load checkpoint from `cfg.MODEL.WEIGHTS`.
     2. Always take BGR image as the input and apply conversion defined by `cfg.INPUT.FORMAT`.
-    3. Apply resizing defined by `cfg.INPUT.{MIN,MAX}_SIZE_TEST`.
-    4. Take one input image and produce a single output, instead of a batch.
+    3. Take one input image and produce a single output, instead of a batch.
 
     Attributes:
         metadata (Metadata): the metadata of the underlying dataset, obtained from
@@ -132,4 +132,68 @@ class OctoPredictor:
 
             inputs = {"image": image, "height": height, "width": width}
             predictions = self.model([inputs])[0]
-            return predictions
+            return predictions['instances'].to("cpu") # to cpu is important unless you want to overflow GPU mem
+
+
+class OctoPredictorBatch:
+    '''
+    Batch prediction version of OctoPredictor (see above)
+    Horst: On my 3070Ti this did lead to only tiny speed improvements (10 perc or less).
+    Either I am doing things wrong, or the memory / processing capability 
+    are not high enough to see a measurable difference with the batch sizes that 
+    I am requesting.    
+    
+    '''
+    def __init__(self, cfg, batch_size, workers=0):
+        
+        self.cfg = cfg.clone()  # cfg can be modified by model
+        self.batch_size = batch_size
+        self.workers = workers
+        assert self.workers > -1, f'Number of workers cannot be negative. Choose 0 to disable parallel processing'
+        self.model = build_model(self.cfg)
+        self.model.eval()
+
+        checkpointer = DetectionCheckpointer(self.model)
+        checkpointer.load(cfg.MODEL.WEIGHTS)
+
+        self.aug = T.ResizeShortestEdge(
+            [cfg.INPUT.MIN_SIZE_TEST, cfg.INPUT.MIN_SIZE_TEST],
+            cfg.INPUT.MAX_SIZE_TEST
+        )
+
+        self.input_format = cfg.INPUT.FORMAT
+        assert self.input_format in ["RGB", "BGR"], self.input_format
+
+    def __collate(self, batch):
+        data = []
+        for image in batch:
+            # Apply pre-processing to image.
+            if self.input_format == "RGB":
+                # whether the model expects BGR inputs or RGB
+                image = image[:, :, ::-1]
+            height, width = image.shape[:2]
+
+            image = self.aug.get_transform(image).apply_image(image)
+            image = image.astype("float32").transpose(2, 0, 1)
+            image = torch.as_tensor(image)
+            data.append({"image": image, "height": height, "width": width})
+        return data
+
+    def __call__(self, images):
+        """
+        """
+        loader = DataLoader(
+            images,
+            self.batch_size,
+            shuffle=False,
+            num_workers=self.workers,
+            collate_fn=self.__collate,
+            pin_memory=True
+        )
+        with torch.no_grad():
+            results = []
+            for batch in loader:
+                predictions = self.model(batch)
+                predictions = [pred['instances'].to("cpu") for pred in predictions]
+                results.append(predictions)
+            return results
