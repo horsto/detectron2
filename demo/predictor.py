@@ -126,7 +126,11 @@ class VisualizationDemo:
                 yield process_predictions(frame, predictions)
         else:
             for frame in frame_gen:
-                yield process_predictions(frame, self.predictor(frame))
+                #frame = cv2.resize(src=frame, dsize=(593,800), interpolation = cv2.INTER_AREA)
+                #print(frame.shape)
+                out = self.predictor(frame)
+                #print(out['instances'])
+                yield process_predictions(frame, out)
 
 
 class AsyncPredictor:

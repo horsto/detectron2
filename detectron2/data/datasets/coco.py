@@ -27,6 +27,7 @@ logger = logging.getLogger(__name__)
 __all__ = ["load_coco_json", "load_sem_seg", "convert_to_coco_json", "register_coco_instances"]
 
 
+
 def load_coco_json(json_file, image_root, dataset_name=None, extra_annotation_keys=None):
     """
     Load a json file with COCO's instances annotation format.
@@ -472,7 +473,7 @@ def convert_to_coco_json(dataset_name, output_file, allow_cached=True):
             logger.info(f"Caching COCO format annotations at '{output_file}' ...")
             tmp_file = output_file + ".tmp"
             with PathManager.open(tmp_file, "w") as f:
-                json.dump(coco_dict, f)
+                json.dump(coco_dict, f, cls=NpEncoder)
             shutil.move(tmp_file, output_file)
 
 
@@ -537,3 +538,15 @@ if __name__ == "__main__":
         vis = visualizer.draw_dataset_dict(d)
         fpath = os.path.join(dirname, os.path.basename(d["file_name"]))
         vis.save(fpath)
+        
+        
+        
+class NpEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, np.integer):
+            return int(obj)
+        if isinstance(obj, np.floating):
+            return float(obj)
+        if isinstance(obj, np.ndarray):
+            return obj.tolist()
+        return super(NpEncoder, self).default(obj)

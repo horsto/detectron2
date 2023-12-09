@@ -30,6 +30,15 @@ try:
 except ImportError:
     COCOeval_opt = COCOeval
 
+class NpEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, np.integer):
+            return int(obj)
+        if isinstance(obj, np.floating):
+            return float(obj)
+        if isinstance(obj, np.ndarray):
+            return obj.tolist()
+        return super(NpEncoder, self).default(obj)
 
 class COCOEvaluator(DatasetEvaluator):
     """
@@ -248,7 +257,7 @@ class COCOEvaluator(DatasetEvaluator):
             file_path = os.path.join(self._output_dir, "coco_instances_results.json")
             self._logger.info("Saving results to {}".format(file_path))
             with PathManager.open(file_path, "w") as f:
-                f.write(json.dumps(coco_results))
+                f.write(json.dumps(coco_results, cls=NpEncoder))
                 f.flush()
 
         if not self._do_evaluation:
